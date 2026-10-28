@@ -10,6 +10,7 @@ dirs = "7.0.0"
 eframe = { version = "0.37.0", default-features = false, features = ["glow", "wayland", "x11", "default_fonts", "clipboard", "links", "system_fonts", "accesskit"] }
 egui_extras = { version = "0.37.0", features = ["datepicker"] }
 jiff = "0.2.38"
+ksni = { version = "0.3.7", default-features = false, features = ["blocking", "async-io"] }
 notify-rust = "4.18.2"
 rfd = "0.17.2"
 serde = { version = "1.0.229", features = ["derive"] }

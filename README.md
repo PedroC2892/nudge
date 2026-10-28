@@ -13,6 +13,7 @@ when the window is closed.
 - Smart views: All, Today, Upcoming, Overdue, Important, Completed
 - Search (Ctrl+F) and sort by time, title or creation date
 - Desktop notifications with **Mark as done**, **Snooze** and **Open** actions, optional sound
+- System tray icon that stays when the window is closed; click it to open the app
 - Background notification service that starts on login
 - Import and export iCalendar (`.ics`) files
 - 12/24-hour time format

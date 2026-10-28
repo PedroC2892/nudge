@@ -3,6 +3,8 @@
 
 use crate::store::{Reminder, Store};
 use chrono::{Duration, Local};
+use ksni::blocking::TrayMethods;
+use ksni::menu::StandardItem;
 use notify_rust::{Hint, Notification, Timeout, Urgency};
 use std::fs::File;
 use std::process::{Command, Stdio};
@@ -20,6 +22,11 @@ pub fn run() {
         return; // already running
     }
     let store = Arc::new(Store::open().expect("cannot open data directory"));
+    // Keep the handle alive: dropping it removes the icon.
+    let _tray = Tray
+        .spawn()
+        .inspect_err(|e| eprintln!("nudge: no system tray: {e}"))
+        .ok();
 
     loop {
         match store.update(|d| (d.take_due(Local::now()), d.settings.clone())) {
@@ -42,7 +49,6 @@ fn notify(store: &Arc<Store>, r: Reminder, sound: bool, snooze_minutes: u32) {
         .icon(&icon())
         .urgency(if r.important { Urgency::Critical } else { Urgency::Normal })
         .timeout(Timeout::Never)
-        .hint(Hint::Resident(true))
         .hint(Hint::Category("reminder".into()))
         .action("default", "Open");
     // ponytail: done/snooze only for one-off reminders; repeating ones already moved to the next occurrence
@@ -87,15 +93,72 @@ fn escape(s: &str) -> String {
 }
 
 /// install.sh puts the icon next to the data, since ~/.local/share/icons may not be writable.
-fn icon() -> String {
-    dirs::data_dir()
-        .map(|d| d.join("nudge/nudge.svg"))
-        .filter(|p| p.exists())
-        .map_or("appointment-soon".into(), |p| p.display().to_string())
+fn icon_dir() -> Option<std::path::PathBuf> {
+    dirs::data_dir().map(|d| d.join("nudge")).filter(|d| d.join("nudge.svg").exists())
 }
 
+fn icon() -> String {
+    icon_dir().map_or("appointment-soon".into(), |d| d.join("nudge.svg").display().to_string())
+}
+
+/// System tray icon that stays while the window is closed.
+struct Tray;
+
+impl ksni::Tray for Tray {
+    fn id(&self) -> String {
+        "nudge".into()
+    }
+
+    fn title(&self) -> String {
+        "Nudge".into()
+    }
+
+    fn icon_theme_path(&self) -> String {
+        icon_dir().map(|d| d.display().to_string()).unwrap_or_default()
+    }
+
+    fn icon_name(&self) -> String {
+        if icon_dir().is_some() { "nudge" } else { "appointment-soon" }.into()
+    }
+
+    fn tool_tip(&self) -> ksni::ToolTip {
+        ksni::ToolTip { title: "Nudge".into(), description: "Click to open your reminders".into(), ..Default::default() }
+    }
+
+    fn activate(&mut self, _x: i32, _y: i32) {
+        if let Err(e) = open_window() {
+            eprintln!("nudge: cannot open window: {e}");
+        }
+    }
+
+    fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
+        vec![
+            StandardItem {
+                label: "Open Nudge".into(),
+                activate: Box::new(|t: &mut Self| t.activate(0, 0)),
+                ..Default::default()
+            }
+            .into(),
+            ksni::MenuItem::Separator,
+            StandardItem {
+                label: "Quit (stop notifications)".into(),
+                icon_name: "application-exit".into(),
+                activate: Box::new(|_: &mut Self| std::process::exit(0)),
+                ..Default::default()
+            }
+            .into(),
+        ]
+    }
+}
+
+/// Opens the window, or brings the open one to front (see `main::claim_window`).
 fn open_window() -> std::io::Result<()> {
-    let mut child = Command::new(std::env::current_exe()?)
+    let mut cmd = Command::new(std::env::current_exe()?);
+    // Lets Wayland compositors give focus to the new window.
+    if let Some(token) = ksni::current_xdg_activation_token() {
+        cmd.env("XDG_ACTIVATION_TOKEN", token);
+    }
+    let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .spawn()?;

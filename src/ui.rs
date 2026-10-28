@@ -7,6 +7,7 @@ use eframe::egui::{
 };
 use egui_extras::DatePickerButton;
 use std::fs;
+use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -96,7 +97,17 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext) -> Self {
+    pub fn new(cc: &eframe::CreationContext, listener: Option<UnixListener>) -> Self {
+        if let Some(listener) = listener {
+            let ctx = cc.egui_ctx.clone();
+            std::thread::spawn(move || {
+                for _ in listener.incoming() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                    ctx.request_repaint();
+                }
+            });
+        }
         cc.egui_ctx.all_styles_mut(|s| {
             s.spacing.item_spacing = vec2(8.0, 8.0);
             s.spacing.button_padding = vec2(10.0, 6.0);
