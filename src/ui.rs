@@ -15,7 +15,7 @@ const ACCENT: Color32 = Color32::from_rgb(0x35, 0x84, 0xe4);
 const DANGER: Color32 = Color32::from_rgb(0xe0, 0x1b, 0x24);
 const STAR: Color32 = Color32::from_rgb(0xf6, 0xd3, 0x2d);
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum View {
     All,
     Today,
@@ -26,7 +26,7 @@ enum View {
     List(u64),
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum Sort {
     Due,
     Title,
@@ -446,7 +446,32 @@ impl App {
                 });
             })
             .response;
-        if resp.interact(egui::Sense::click()).double_clicked() {
+
+        resp.container_context_menu(|ui| {
+            if ui.button("✏  Edit").clicked() {
+                self.draft = Some(Draft::new(r.clone()));
+                ui.close();
+            }
+            let done_text = if r.done { "Mark as not done" } else { "✔  Mark as done" };
+            if ui.button(done_text).clicked() {
+                let id = r.id;
+                self.commit(|d| {
+                    if let Some(x) = d.get_mut(id) {
+                        x.done = !x.done;
+                    }
+                });
+                ui.close();
+            }
+            if ui.button(RichText::new("🗑  Delete").color(DANGER)).clicked() {
+                self.confirm_delete = Some((Some(r.id), 0));
+                ui.close();
+            }
+        });
+
+        let dbl_click = resp.container_contains_pointer()
+            && !resp.context_menu_opened()
+            && ui.input(|i| i.pointer.button_double_clicked(egui::PointerButton::Primary));
+        if dbl_click && self.confirm_delete.is_none() {
             self.draft = Some(Draft::new(r.clone()));
         }
         ui.add_space(2.0);
@@ -458,6 +483,7 @@ impl App {
         let Some(d) = self.draft.as_mut() else { return };
         let mut save = false;
         let mut cancel = false;
+        let mut delete = false;
         let lists = self.data.lists.clone();
         let modal = Modal::new(Id::unique("editor")).show(ctx, |ui| {
             ui.set_width(440.0);
@@ -528,19 +554,28 @@ impl App {
 
             ui.add_space(8.0);
             let ok = !d.r.title.trim().is_empty();
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.add_enabled(ok, Button::new(RichText::new("Save").color(Color32::WHITE)).fill(ACCENT)).clicked() {
-                    save = true;
+            let is_existing = d.r.id != 0;
+            ui.horizontal(|ui| {
+                if is_existing && ui.button(RichText::new("🗑 Delete").color(DANGER)).on_hover_text("Delete reminder").clicked() {
+                    delete = true;
                 }
-                if ui.button("Cancel").clicked() {
-                    cancel = true;
-                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.add_enabled(ok, Button::new(RichText::new("Save").color(Color32::WHITE)).fill(ACCENT)).clicked() {
+                        save = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
             });
             if ok && ok_shortcut(ui, &title) {
                 save = true;
             }
         });
-        if save {
+        if delete {
+            let id = self.draft.take().unwrap().r.id;
+            self.confirm_delete = Some((Some(id), 0));
+        } else if save {
             let r = self.draft.take().unwrap().finish();
             self.commit(|d| {
                 let mut r = r;
@@ -597,7 +632,13 @@ impl App {
     fn delete_dialog(&mut self, ctx: &egui::Context) {
         let Some((reminder, list)) = self.confirm_delete else { return };
         let what = match reminder {
-            Some(id) => self.data.reminders.iter().find(|r| r.id == id).map(|r| format!("Delete “{}”?", r.title)),
+            Some(id) => self.data.reminders.iter().find(|r| r.id == id).map(|r| {
+                if r.title.trim().is_empty() {
+                    "Delete this reminder?".to_string()
+                } else {
+                    format!("Delete “{}”?", r.title)
+                }
+            }),
             None => self.list_name_of(list).map(|n| format!("Delete list “{n}” and all its reminders?")),
         };
         let Some(what) = what else {
@@ -605,6 +646,7 @@ impl App {
             return;
         };
         let mut yes = false;
+        let mut cancel = false;
         let modal = Modal::new(Id::unique("delete")).show(ctx, |ui| {
             ui.set_width(340.0);
             ui.label(RichText::new(what).size(16.0));
@@ -614,13 +656,21 @@ impl App {
                     yes = true;
                 }
                 if ui.button("Cancel").clicked() {
-                    ui.close();
+                    cancel = true;
                 }
             });
+            if ui.input(|i| i.key_pressed(Key::Enter)) {
+                yes = true;
+            }
+            if ui.input(|i| i.key_pressed(Key::Escape)) {
+                cancel = true;
+            }
         });
         if yes {
             self.commit(|d| match reminder {
-                Some(id) => d.reminders.retain(|r| r.id != id),
+                Some(id) => {
+                    d.delete(id);
+                }
                 None => {
                     d.lists.retain(|l| l.id != list);
                     d.reminders.retain(|r| r.list != Some(list));
@@ -630,7 +680,7 @@ impl App {
                 self.view = View::All;
             }
             self.confirm_delete = None;
-        } else if modal.should_close() {
+        } else if cancel || modal.should_close() {
             self.confirm_delete = None;
         }
     }
@@ -789,4 +839,160 @@ fn set_autostart(on: bool) -> std::io::Result<()> {
             exe.display()
         ),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eframe::egui::{Event, RawInput};
+
+    fn make_test_app() -> (App, PathBuf) {
+        let temp_dir = std::env::temp_dir().join(format!("nudge-test-{}", Local::now().timestamp_nanos_opt().unwrap_or(0)));
+        let _ = fs::create_dir_all(&temp_dir);
+        let store_path = temp_dir.join("data.json");
+        let store = Store::at(store_path.clone());
+        let mut app = App {
+            store,
+            data: Data::default(),
+            mtime: None,
+            view: View::All,
+            search: String::new(),
+            sort: Sort::Due,
+            show_done: false,
+            draft: None,
+            list_name: None,
+            confirm_delete: None,
+            settings_open: false,
+            status: None,
+        };
+        let mut r1 = Reminder::new(1, None);
+        r1.title = "Buy milk".to_string();
+        let mut r2 = Reminder::new(2, None);
+        r2.title = "Call doctor".to_string();
+        app.commit(|d| {
+            d.reminders = vec![r1, r2];
+            d.next_id = 2;
+        });
+        (app, temp_dir)
+    }
+
+    #[test]
+    fn test_delete_dialog_confirms_and_deletes() {
+        let (mut app, temp_dir) = make_test_app();
+        let ctx = egui::Context::default();
+
+        app.confirm_delete = Some((Some(1), 0));
+
+        let mut raw_input = RawInput::default();
+        raw_input.events.push(Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::default(),
+        });
+
+        let mut out = ctx.run_pass(raw_input, |ctx| {
+            app.delete_dialog(ctx);
+        });
+        out.textures_delta.clear();
+
+        assert_eq!(app.confirm_delete, None);
+        assert_eq!(app.data.reminders.len(), 1);
+        assert_eq!(app.data.reminders[0].id, 2);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_delete_dialog_cancel_keeps_reminder() {
+        let (mut app, temp_dir) = make_test_app();
+        let ctx = egui::Context::default();
+
+        app.confirm_delete = Some((Some(1), 0));
+
+        let mut raw_input = RawInput::default();
+        raw_input.events.push(Event::Key {
+            key: Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::default(),
+        });
+
+        let mut out = ctx.run_pass(raw_input, |ctx| {
+            app.delete_dialog(ctx);
+        });
+        out.textures_delta.clear();
+
+        assert_eq!(app.confirm_delete, None);
+        assert_eq!(app.data.reminders.len(), 2);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_delete_dialog_with_empty_title() {
+        let (mut app, temp_dir) = make_test_app();
+        let ctx = egui::Context::default();
+
+        app.commit(|d| {
+            d.reminders[0].title = "   ".to_string();
+        });
+        app.confirm_delete = Some((Some(1), 0));
+
+        let mut raw_input = RawInput::default();
+        raw_input.events.push(Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::default(),
+        });
+
+        let mut out = ctx.run_pass(raw_input, |ctx| {
+            app.delete_dialog(ctx);
+        });
+        out.textures_delta.clear();
+
+        assert_eq!(app.confirm_delete, None);
+        assert_eq!(app.data.reminders.len(), 1);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_delete_list_deletes_list_and_its_reminders() {
+        let (mut app, temp_dir) = make_test_app();
+        let ctx = egui::Context::default();
+
+        app.commit(|d| {
+            d.lists.push(List { id: 10, name: "Groceries".to_string() });
+            d.reminders[0].list = Some(10);
+        });
+        app.view = View::List(10);
+        app.confirm_delete = Some((None, 10));
+
+        let mut raw_input = RawInput::default();
+        raw_input.events.push(Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::default(),
+        });
+
+        let mut out = ctx.run_pass(raw_input, |ctx| {
+            app.delete_dialog(ctx);
+        });
+        out.textures_delta.clear();
+
+        assert_eq!(app.confirm_delete, None);
+        assert!(app.data.lists.is_empty());
+        assert_eq!(app.data.reminders.len(), 1);
+        assert_eq!(app.data.reminders[0].id, 2);
+        assert_eq!(app.view, View::All);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
 }

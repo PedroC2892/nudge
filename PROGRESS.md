@@ -56,10 +56,18 @@ binary went from 32 MB to 24 MB.
 - Autostart entry visible in KDE System Settings > Autostart.
 - Menu entry in a single category (Utility).
 
+## M4 — Reminder deletion: DONE (2026-10-28)
+
+- Fixed button click handling on reminder cards by removing the frame's post-layout `interact(Sense::click())` call that swallowed button clicks; double-click to edit now checks pointer position on the container.
+- Added `Data::delete` in `store.rs` to delete reminders by id.
+- Added "Delete" action button in the reminder editor dialog for existing reminders.
+- Added right-click context menu on reminder cards ("Edit", "Mark as done", "Delete").
+- Improved delete confirmation dialog with `Enter` shortcut to confirm and `Escape` to cancel.
+
 ## Tests
 
 `cargo test`: repeat rules and end dates, missed-occurrence handling, fast
-skipping of old minutely reminders, `.ics` round trip.
+skipping of old minutely reminders, `.ics` round trip, reminder deletion, delete dialog confirmations and cancellations.
 `cargo clippy` clean.
 
 ## Open items / ideas

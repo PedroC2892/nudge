@@ -207,6 +207,13 @@ impl Data {
         }
     }
 
+    /// Delete a reminder by id. Returns true if a reminder was found and removed.
+    pub fn delete(&mut self, id: u64) -> bool {
+        let initial_len = self.reminders.len();
+        self.reminders.retain(|r| r.id != id);
+        self.reminders.len() != initial_len
+    }
+
     /// Marks due reminders as notified (or moves repeating ones to their next
     /// occurrence) and returns copies of the ones that must be notified now.
     pub fn take_due(&mut self, now: DateTime<Local>) -> Vec<Reminder> {
@@ -239,6 +246,14 @@ impl Store {
             .join("nudge");
         fs::create_dir_all(&dir)?;
         Ok(Store { path: dir.join("data.json") })
+    }
+
+    #[cfg(test)]
+    pub fn at(path: PathBuf) -> Store {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        Store { path }
     }
 
     fn lock(&self) -> io::Result<File> {
@@ -327,5 +342,16 @@ mod tests {
         assert_eq!(r.next_after(at(1990, 1, 1, 0), now), Some(at(2026, 1, 1, 12) + Duration::minutes(1)));
         let huge = Repeat { freq: Freq::Weeks, every: u32::MAX, until: None };
         assert_eq!(huge.next_after(at(2026, 1, 1, 9), now), None);
+    }
+
+    #[test]
+    fn delete_reminder() {
+        let mut d = Data::default();
+        d.reminders.push(Reminder::new(1, None));
+        d.reminders.push(Reminder::new(2, None));
+        assert!(d.delete(1));
+        assert!(!d.delete(1));
+        assert_eq!(d.reminders.len(), 1);
+        assert_eq!(d.reminders[0].id, 2);
     }
 }
