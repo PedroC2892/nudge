@@ -21,7 +21,7 @@ Comment=Remember what to do and when
 Exec=$BIN/nudge
 Icon=$ICON
 Terminal=false
-Categories=Utility;Office;
+Categories=Utility;
 Keywords=reminder;todo;task;alarm;
 StartupWMClass=nudge
 DESKTOP
