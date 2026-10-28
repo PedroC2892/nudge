@@ -58,17 +58,26 @@ impl Repeat {
         self.freq != Freq::Never
     }
 
+    /// Fixed length of one step, or None for calendar-based steps.
+    fn period(&self) -> Option<Duration> {
+        let n = i64::from(self.every.max(1));
+        match self.freq {
+            Freq::Minutes => Some(Duration::minutes(n)),
+            Freq::Hours => Some(Duration::hours(n)),
+            Freq::Days => Some(Duration::days(n)),
+            Freq::Weeks => Some(Duration::weeks(n)),
+            _ => None,
+        }
+    }
+
     /// Next occurrence strictly after `from`, or None when the series ended.
     pub fn next(&self, from: DateTime<Local>) -> Option<DateTime<Local>> {
         let n = self.every.max(1);
         let next = match self.freq {
             Freq::Never => return None,
-            Freq::Minutes => from + Duration::minutes(n.into()),
-            Freq::Hours => from + Duration::hours(n.into()),
-            Freq::Days => from + Duration::days(n.into()),
-            Freq::Weeks => from + Duration::weeks(n.into()),
             Freq::Months => from.checked_add_months(Months::new(n))?,
             Freq::Years => from.checked_add_months(Months::new(n.checked_mul(12)?))?,
+            _ => from.checked_add_signed(self.period()?)?,
         };
         match self.until {
             Some(until) if next.date_naive() > until => None,
@@ -78,13 +87,21 @@ impl Repeat {
 
     /// First occurrence after `now`, skipping the ones missed while the computer was off.
     pub fn next_after(&self, mut due: DateTime<Local>, now: DateTime<Local>) -> Option<DateTime<Local>> {
-        // ponytail: linear walk, a minutely reminder missed for a year is ~500k steps (still < 1s)
-        loop {
+        // Jump over whole missed periods at once, so an old minutely reminder costs nothing.
+        if let Some(p) = self.period()
+            && due < now
+        {
+            let skipped = (now - due).num_seconds() / p.num_seconds();
+            due = due.checked_add_signed(p.checked_mul(i32::try_from(skipped).ok()?)?)?;
+        }
+        // Months/years step by calendar; at most 12 steps per missed year.
+        for _ in 0..100_000 {
             due = self.next(due)?;
             if due > now {
                 return Some(due);
             }
         }
+        None
     }
 
     pub fn describe(&self) -> String {
@@ -301,5 +318,14 @@ mod tests {
         assert_eq!(d.reminders[1].due, Some(at(2026, 1, 11, 9)));
         assert!(!d.reminders[1].notified);
         assert!(d.take_due(at(2026, 1, 10, 12)).is_empty());
+    }
+
+    #[test]
+    fn next_after_is_fast_and_exact() {
+        let r = Repeat { freq: Freq::Minutes, every: 1, until: None };
+        let now = at(2026, 1, 1, 12) + Duration::seconds(30);
+        assert_eq!(r.next_after(at(1990, 1, 1, 0), now), Some(at(2026, 1, 1, 12) + Duration::minutes(1)));
+        let huge = Repeat { freq: Freq::Weeks, every: u32::MAX, until: None };
+        assert_eq!(huge.next_after(at(2026, 1, 1, 9), now), None);
     }
 }

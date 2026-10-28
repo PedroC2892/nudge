@@ -95,7 +95,7 @@ fn parse_rrule(v: &str) -> Repeat {
                     _ => Freq::Never,
                 }
             }
-            "INTERVAL" => rep.every = val.parse().unwrap_or(1).max(1),
+            "INTERVAL" => rep.every = val.parse().unwrap_or(1).clamp(1, 999),
             "UNTIL" => rep.until = val.get(..8).and_then(|d| NaiveDate::parse_from_str(d, "%Y%m%d").ok()),
             _ => {}
         }

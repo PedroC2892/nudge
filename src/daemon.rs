@@ -4,8 +4,7 @@
 use crate::store::{Reminder, Store};
 use chrono::{Duration, Local};
 use notify_rust::{Hint, Notification, Timeout, Urgency};
-use std::os::linux::net::SocketAddrExt;
-use std::os::unix::net::{SocketAddr, UnixListener};
+use std::fs::File;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
@@ -13,14 +12,13 @@ use std::thread;
 const TICK: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub fn run() {
-    // An abstract socket is released by the kernel when the process dies,
-    // so it doubles as a stale-proof single-instance lock.
-    // Abstract names are shared by all users, so the uid keeps another user from blocking ours.
-    let uid = std::os::unix::fs::MetadataExt::uid(&std::fs::metadata("/proc/self").expect("procfs"));
-    let addr = SocketAddr::from_abstract_name(format!("nudge-daemon-{uid}")).expect("valid socket name");
-    let Ok(_guard) = UnixListener::bind_addr(&addr) else {
+    // flock is released by the kernel when the process dies, so it is a
+    // stale-proof single-instance lock. XDG_RUNTIME_DIR is private to the user.
+    let Some(dir) = dirs::runtime_dir().or_else(dirs::data_dir) else { return };
+    let Ok(lock) = File::create(dir.join("nudge-daemon.lock")) else { return };
+    if lock.try_lock().is_err() {
         return; // already running
-    };
+    }
     let store = Arc::new(Store::open().expect("cannot open data directory"));
 
     loop {
@@ -39,8 +37,8 @@ pub fn run() {
 fn notify(store: &Arc<Store>, r: Reminder, sound: bool, snooze_minutes: u32) {
     let mut n = Notification::new();
     n.appname("Nudge")
-        .summary(&r.title)
-        .body(&r.notes)
+        .summary(&escape(&r.title))
+        .body(&escape(&r.notes))
         .icon(&icon())
         .urgency(if r.important { Urgency::Critical } else { Urgency::Normal })
         .timeout(Timeout::Never)
@@ -81,6 +79,11 @@ fn notify(store: &Arc<Store>, r: Reminder, sound: bool, snooze_minutes: u32) {
             }
         });
     });
+}
+
+/// Notification servers parse a subset of HTML; titles and notes are plain text.
+fn escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
 /// install.sh puts the icon next to the data, since ~/.local/share/icons may not be writable.
