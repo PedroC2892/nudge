@@ -18,3 +18,8 @@ notify-rust = "4.18.2"
 rfd = "0.17.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+
+# Keep debug info for dependencies light to avoid multi-gigabyte target directories
+[profile.dev.package."*"]
+debug = 1
+
