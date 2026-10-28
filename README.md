@@ -56,3 +56,7 @@ cargo run          # open the window
 cargo run -- --daemon
 cargo test
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).

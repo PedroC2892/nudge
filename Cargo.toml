@@ -2,6 +2,9 @@
 name = "nudge"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "Desktop reminder app with notifications and a tray icon"
+repository = "https://github.com/PedroC2892/nudge"
 
 [dependencies]
 chrono = { version = "0.4.45", features = ["serde"] }
