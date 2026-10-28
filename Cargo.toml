@@ -1,0 +1,16 @@
+[package]
+name = "nudge"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chrono = { version = "0.4.45", features = ["serde"] }
+dirs = "7.0.0"
+# glow (OpenGL) instead of the default wgpu: wgpu's Vulkan setup took ~13 s on startup here.
+eframe = { version = "0.37.0", default-features = false, features = ["glow", "wayland", "x11", "default_fonts", "clipboard", "links", "system_fonts", "accesskit"] }
+egui_extras = { version = "0.37.0", features = ["datepicker"] }
+jiff = "0.2.38"
+notify-rust = "4.18.2"
+rfd = "0.17.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
