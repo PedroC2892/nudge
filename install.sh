@@ -31,10 +31,10 @@ mkdir -p "$HOME/.config/autostart"
 cat > "$HOME/.config/autostart/nudge-service.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=Nudge notification service
+Name=Nudge
+Comment=Reminder notifications and tray icon
 Exec="$BIN/nudge" --daemon
 Icon=$ICON
-NoDisplay=true
 X-GNOME-Autostart-enabled=true
 DESKTOP
 

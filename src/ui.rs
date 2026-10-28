@@ -785,7 +785,7 @@ fn set_autostart(on: bool) -> std::io::Result<()> {
     fs::write(
         path,
         format!(
-            "[Desktop Entry]\nType=Application\nName=Nudge notification service\nExec=\"{}\" --daemon\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\n",
+            "[Desktop Entry]\nType=Application\nName=Nudge\nComment=Reminder notifications and tray icon\nExec=\"{}\" --daemon\nX-GNOME-Autostart-enabled=true\n",
             exe.display()
         ),
     )
